@@ -5,40 +5,113 @@
     </head>
 <body>
 
-    <h1>How to Host A Website from Github?</h1>
+    <h1>Hosting a Portfolio Site on AWS EC2 with NGINX</h1>
 
     <a href="https://bkulek20.github.io/MyPortfolio2/index.html" style="color: rgb(147,187,68); ">Home</a>
 
     <br><br>
     
-    <p2>Proje Yapısını Oluşturmak<br><br>
-        İlk adım olarak GitHub’da MyWebsite2 adında public bir repository oluşturdum ve projeyi bilgisayarıma şu komutla klonladım:
-        git clone "clone_url"<br><br>
-        GitHub repo linkime buradan ulaşabilirsiniz: https://github.com/bkulek20/MyWebsite2<br><br>
+    <p2>In this post, I’ll walk through how I deployed my personal portfolio site on an AWS EC2 instance using NGINX. <br><br>
+        1. Launching a Linux EC2 Instance<br><br>
+        I launched a new EC2 instance named nginx-test2 in the eu-west-1 region. 
+        By default, AWS placed the instance in a private subnet within the default VPC. 
+        Although a public IP was assigned, there was no route to an Internet Gateway (IGW) in the subnet’s route table — meaning the instance had no outbound internet access.
+        Thus, I cannot connect my EC2 instance.<br>
+        To resolve this:<br><br>
         
-        Daha sonra çok basit bir index.html dosyası oluşturdum.<br><br>
-        
-        GitHub Pages kullanarak projeyi yayına almak için şu adımları izledim:<br><br>
-        •	GitHub'da Settings → Pages sekmesine gittim.<br>
-        •	Build and Deployment kısmından Source seçeneğini Deploy from a branch olarak ayarladım.<br>
-        •	main branch’imi seçip kaydettim.<br><br>
-        Kısa bir süre sonra site otomatik olarak yayınlandı ve bağlantı üzerinden erişilebilir hale geldi.<br><br>
+        -> I created a new Internet Gateway (IGW). <br>
 
-        After that, I planned my web app’s structure as followed: <br><br>
-            index.html -> for the frontend <br>
-            main.css -> for styling <br>
-            app.js -> for adding functionality <br>
-        I used HTML, CSS, and JavaScript for development. <br><br>
+        -> Updated the Route Table to direct 0.0.0.0/0 traffic to the IGW.<br>
         
-        To commit a change from VS Code to GitHub, I used the following commands: <br><br>
-        git add .<br>
-        git commit -m “comment”<br>
-        git push origin main<br><br>
+        -> Created a new public subnet and associated it with this route table.<br>
+
+        -> Launched my EC2 instance within this new public subnet.<br>
+
+        Once launched, I was able to connect without issues.
+
+        2. Taking a Snapshot After Installation <br><br>
+        To preserve the clean, post-install state of my EC2 instance, 
+        I took a snapshot of its EBS volume:<br><br>
+        -> Navigated to EC2 > Elastic Block Store > Volumes<br>
+        -> Selected the volume and clicked Actions > Create Snapshot<br><br>
         
-        To access my website and host it on GitHub, I first filled the index.html and main.css files. This displayed the content of my website. <br><br>
-        To host the website from Github, I went to Settings -> Pages -> selected my main branch -> Save. Then, the link of my website became visible.<br><br>
-    
-        I realized that changes that I committed to GitHub were reflected on my website with a slight delay.
+        This snapshot (named nginx-ss-bkulek) allows me to recreate identical EC2 instances anytime 
+        via “Create Volume” > “Launch instance from volume.”<br><br>
+
+
+        3. Restricting SSH Access to My IP <br><br>
+        For security, I locked down SSH access:<br><br>
+        -> Went to Security Groups > Edit Inbound Rules<br>
+        -> Changed the SSH rule’s source from 0.0.0.0/0 to my own IP (163.116.166.153/32)<br><br>
+        
+        Now, only my IP can access port 22 on this server.<br><br>
+
+
+        4. Installing a Web Server <br><br>
+        I installed NGINX on my Amazon Linux instance:<br><br>
+        -> sudo yum -y update<br>
+        -> sudo yum -y install nginx<br>
+        -> sudo systemctl start nginx<br>
+        -> sudo systemctl enable nginx<br><br>
+        
+        Then I visited http://54.229.246.19 (my instance’s public IP), and saw the NGINX welcome page — success!<br><br>
+
+        5. Hosting My Portfolio Website <br><br>
+        I cloned my GitHub repository and copied it to the NGINX root directory:<br><br>
+        -> sudo yum install git -y<br>
+        -> cd /tmp<br>
+        -> git clone https://github.com/bkulek20/MyPortfolio2.git<br>
+        -> sudo cp -r MyPortfolio2/* /usr/share/nginx/html/x<br><br>
+        Restarted the nginx to see my website:<br><br>
+        -> sudo systemctl restart nginx<br><br>
+
+        Then, I could see my portfolio web site live.<br><br>
+
+
+        6. Blocking Access to /admin Page <br><br>
+        To restrict access to /admin, I edited the NGINX configuration:<br><br>
+        -> sudo nano /etc/nginx/nginx.conf<br><br>
+      
+        Inside the server{ ... } block, I added:<br><br>
+        -> location /admin {<br>
+               allow 163.116.166.153;<br>
+               deny all;<br>
+        }<br><br>
+
+        <br><br>
+        -> sudo systemctl reload nginx <br><br>
+
+        Only my IP could access /admin.<br><br>
+
+
+        7. Monitoring CPU, Memory, and Process Usage <br><br>
+        Before and after installing NGINX, I checked system resource usage:<br><br>
+        CPU + Memory Summary:<br><br>
+        -> top -n 1 | head -10<br>
+        -> -> Before: CPU usage was 0%, system was idle
+        -> -> After: CPU usage was increased to 5.9%, which means nginx starts to use cpu.<br><br>
+
+        RAM Usage:<br><br>
+        -> free -m<br>
+        -> -> RAM usage increased after NGINX installation (from 148MB to 161MB)<br><br>
+
+
+        Top RAM-consuming Processes:<br><br>
+        -> ps aux --sort=-%mem | head<br>
+        -> -> NGINX didn’t even make the top 10 — it’s lightweight.<br><br>
+
+        8. Viewing Access and Error Logs <br><br>
+        To verify live site activity and debug errors, I used:<br><br>
+        -> sudo tail -f /var/log/nginx/access.log<br>
+        -> sudo tail -f /var/log/nginx/error.log<br><br>
+        Access Log: Confirmed the last site visit timestamp<br>        
+        Error Log: Logs if any error occurs<br><br>
+
+        Conclusion <br><br>
+        From subnet routing to secure access and resource monitoring — 
+        this setup gave me full control over how my portfolio site is deployed and served.<br><br>
+
+
     </p2>
 
 
